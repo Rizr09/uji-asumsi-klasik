@@ -10,6 +10,8 @@ from statsmodels.stats.stattools import durbin_watson
 from statsmodels.stats.diagnostic import het_breuschpagan
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+from report_generator import plot_residuals, generate_pdf
+
 
 # Set up page config
 st.set_page_config(
@@ -190,8 +192,7 @@ if uploaded_files:
     datasets = {file.name: pd.read_excel(file) for file in uploaded_files}
 
     # Dataset selection
-    selected_dataset = st.sidebar.selectbox(
-        "Choose a dataset", options=list(datasets.keys()))
+    selected_dataset = st.sidebar.selectbox("Choose a dataset", options=list(datasets.keys()))
     data = datasets[selected_dataset]
 
     # Show preview of the selected dataset
@@ -199,16 +200,13 @@ if uploaded_files:
     st.write(data.head())
 
     # Variable selection
-    dependent_var = st.sidebar.selectbox(
-        "Select the dependent variable", options=data.columns)
-    independent_vars = st.sidebar.multiselect("Select independent variables", options=[
-                                              col for col in data.columns if col != dependent_var])
+    dependent_var = st.sidebar.selectbox("Select the dependent variable", options=data.columns)
+    independent_vars = st.sidebar.multiselect("Select independent variables", options=[col for col in data.columns if col != dependent_var])
 
     # Additional options
     st.sidebar.subheader("Additional Options")
     standardize = st.sidebar.checkbox("Standardize variables", value=False)
-    test_size = st.sidebar.slider(
-        "Test set size", min_value=0.1, max_value=0.5, value=0.2, step=0.1)
+    test_size = st.sidebar.slider("Test set size", min_value=0.1, max_value=0.5, value=0.2, step=0.1)
 
     if dependent_var and independent_vars:
         # Prepare the data for linear regression
@@ -221,120 +219,30 @@ if uploaded_files:
             X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
 
         # Split the data into train and test sets
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
 
-                        # Lakukan analisis regresi
-        model, fig1, dw_stat, pval, shapiro_test, fig2, vif_data = perform_regression_analysis(
-            X_train, y_train)
+        # Perform regression analysis
+        model, fig1, dw_stat, pval, shapiro_test, fig2, vif_data = perform_regression_analysis(X_train, y_train)
 
         # Tampilkan ringkasan model
         st.subheader("Ringkasan Model")
         st.text(model.summary())
 
-        # 1. Linearity test
-        st.subheader("1. Uji Linearitas")
-        show_test_info(
-            "Linearitas",
-            "Harus ada hubungan linear antara variabel independen dan variabel dependen.",
-            r"y = \beta_0 + \beta_1x_1 + \beta_2x_2 + ... + \beta_nx_n + \epsilon",
-            "Periksa apakah residual tersebar secara acak di sekitar garis horizontal pada 0."
-        )
-        st.plotly_chart(fig1)
-        st.info(
-            "Interpretasikan plot: Lihat penyebaran acak di sekitar garis horizontal pada 0.")
-
-        # 2. Independence test
-        st.subheader("2. Uji Independensi (Statistik Durbin-Watson)")
-        show_test_info(
-            "Uji Durbin-Watson",
-            "Memeriksa autokorelasi dalam residual.",
-            r"DW = \frac{\sum_{t=2}^{n} (e_t - e_{t-1})^2}{\sum_{t=1}^{n} e_t^2}",
-            """
-            DW ≈ 2: Tidak ada autokorelasi.
-            DW < 1.5 atau DW > 2.5: Kemungkinan ada autokorelasi.
-            """
-        )
-        st.metric("Statistik Durbin-Watson", f"{dw_stat:.2f}")
-        if 1.5 < dw_stat < 2.5:
-            st.success("Residual kemungkinan besar independen.")
-        else:
-            st.warning("Kemungkinan ada autokorelasi dalam residual.")
-
-        # 3. Homoscedasticity test
-        st.subheader("3. Uji Homoskedastisitas (Breusch-Pagan)")
-        show_test_info(
-            "Uji Breusch-Pagan",
-            "Menguji varians konstan dalam residual (homoskedastisitas).",
-            r"BP = nR^2 \sim \chi^2_{(p-1)}",
-            "Jika p > 0.05, residual kemungkinan memiliki varians konstan."
-        )
-        st.metric("Nilai p Breusch-Pagan", f"{pval:.4f}")
-        if pval > 0.05:
-            st.success("Residual kemungkinan memiliki varians konstan.")
-        else:
-            st.warning("Residual mungkin memiliki varians tidak konstan.")
-
-        # 4. Normality test
-        st.subheader("4. Uji Normalitas (Uji Shapiro-Wilk)")
-        show_test_info(
-            "Uji Shapiro-Wilk",
-            "Menguji apakah residual terdistribusi normal.",
-            r"W = \frac{(\sum_{i=1}^n a_i x_{(i)})^2}{\sum_{i=1}^n (x_i - \bar{x})^2}",
-            "Jika p > 0.05, residual kemungkinan terdistribusi normal."
-        )
-
-        st.metric("Nilai p Shapiro-Wilk", f"{shapiro_test.pvalue:.4f}")
-        if shapiro_test.pvalue > 0.05:
-            st.success("Residual kemungkinan terdistribusi normal.")
-        else:
-            st.warning("Residual mungkin tidak terdistribusi normal.")
-
-        # Q-Q plot for normality
-        st.plotly_chart(fig2)
-
-        # 5. Multicollinearity test (Variance Inflation Factor - VIF)
-        st.subheader(
-            "5. Uji Multikolinearitas (Variance Inflation Factor - VIF)")
-        show_test_info(
-            "Variance Inflation Factor",
-            "Mengukur tingkat multikolinearitas dalam model regresi.",
-            r"VIF = \frac{1}{1 - R_j^2}",
-            """
-            - **VIF ≈ 1**: Tidak ada multikolinearitas.  
-            - **1 < VIF < 5**: Multikolinearitas sedang.  
-            - **VIF > 5**: Multikolinearitas tinggi.
-            """
-        )
-        st.write(vif_data)
-
-        # Provide insights on multicollinearity
-        if vif_data["VIF"].max() > 5:
-            st.warning(
-                "Beberapa fitur mungkin memiliki multikolinearitas tinggi (VIF > 5). Pertimbangkan untuk menghapus atau menggabungkan variabel yang sangat berkorelasi.")
-        else:
-            st.success("Tidak terdeteksi multikolinearitas yang signifikan (VIF < 5).")
-
-        # Pindahkan Laporan Hasil Uji Diagnostik ke bagian paling bawah
-        st.subheader("Laporan Hasil Uji Diagnostik")
+        # Generate diagnostic report
         diagnostic_report = generate_diagnostic_report(dw_stat, pval, shapiro_test.pvalue, vif_data)
-        st.markdown(diagnostic_report)
 
-        # Opsi untuk mengunduh laporan diagnostik
-        st.download_button(
-            label="Unduh Laporan Diagnostik",
-            data=diagnostic_report,
-            file_name="laporan_diagnostik_regresi.md",
-            mime="text/markdown"
-        )
+        # Generate the PDF report
+        pdf_filename = "Laporan_Linear_Regression.pdf"
+        generate_pdf(model, diagnostic_report, pdf_filename)
 
-        # Option to download the regression model summary
-        st.download_button(
-            label="Unduh Ringkasan Model",
-            data=model.summary().as_text(),
-            file_name="ringkasan_model_regresi.txt",
-            mime="text/plain"
-        )
+        # Option to download the combined PDF report
+        with open(pdf_filename, "rb") as pdf_file:
+            st.download_button(
+                label="Unduh Laporan Diagnostik dan Ringkasan Model (PDF)",
+                data=pdf_file,
+                file_name=pdf_filename,
+                mime="application/pdf"
+            )
     else:
         st.warning("Silakan pilih variabel dependen dan independen.")
 else:
