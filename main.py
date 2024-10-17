@@ -62,13 +62,13 @@ Upload one or multiple datasets, select the dependent variable (target), and ins
 # Sidebar for dataset uploads and options
 st.sidebar.header("Upload Your Datasets")
 uploaded_files = st.sidebar.file_uploader(
-    "Upload CSV files", accept_multiple_files=True, type="csv")
+    "Upload Excel files", accept_multiple_files=True, type=["xlsx", "xls"])
 
 # Function to display test definition, formula, and interpretation
 
 
 def show_test_info(title, definition, formula, interpretation):
-    with st.expander(f"ℹ️ {title} Info"):
+    with st.expander(f"i {title} Info"):
         st.markdown(f"**Definition:** {definition}")
         st.markdown(f"**Formula:**")
         st.latex(formula)
@@ -187,7 +187,7 @@ def generate_diagnostic_report(dw_stat, pval_bp, shapiro_pval, vif_data):
 # Main application logic
 if uploaded_files:
     # Process uploaded datasets
-    datasets = {file.name: pd.read_csv(file) for file in uploaded_files}
+    datasets = {file.name: pd.read_excel(file) for file in uploaded_files}
 
     # Dataset selection
     selected_dataset = st.sidebar.selectbox(
