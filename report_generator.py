@@ -43,7 +43,7 @@ class PDF(FPDF):
         self.ln(10)
 
 # Fungsi untuk membuat PDF
-def generate_pdf(model, diagnostic_report, filename="Laporan_Linear_Regression.pdf"):
+def generate_pdf(model, diagnostic_report, X, filename="Laporan_Linear_Regression.pdf"):
     pdf = PDF()
     pdf.add_page()
 
