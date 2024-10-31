@@ -79,8 +79,6 @@ def show_test_info(title, definition, formula, interpretation):
 
 
 # Function to perform linear regression and assumption tests
-
-
 def perform_regression_analysis(X, y):
     X = sm.add_constant(X)
     model = sm.OLS(y, X).fit()
@@ -122,14 +120,35 @@ def perform_regression_analysis(X, y):
 
     return model, fig1, dw_stat, pval, shapiro_test, fig2, vif_data
 
+# New function to handle violations and apply solutions
+def handle_violations(X, y, violation_type):
+    X = sm.add_constant(X)
+    if violation_type == "heteroscedasticity":
+        # Apply weighted least squares
+        model = sm.OLS(y, X).fit()
+        weights = 1 / (model.resid**2)
+        weighted_model = sm.WLS(y, X, weights=weights).fit()
+        return weighted_model, X, y
+    elif violation_type == "non_normality":
+        # Apply Box-Cox transformation
+        y_transformed, lambda_param = stats.boxcox(y)
+        transformed_model = sm.OLS(y_transformed, X).fit()
+        return transformed_model, X, y_transformed
+    elif violation_type == "autocorrelation":
+        # Apply first-order differencing
+        y_diff = y.diff().dropna()
+        X_diff = X.diff().dropna()
+        diff_model = sm.OLS(y_diff, X_diff).fit()
+        return diff_model, X_diff, y_diff
+
 # Fungsi untuk menghasilkan laporan diagnostik
 def generate_diagnostic_report(dw_stat, pval_bp, shapiro_pval, vif_data):
     report = ""
-    
+
     # Linearitas
     report += "## 1. Linearitas\n"
     report += "Linearitas harus diperiksa secara visual menggunakan plot Residual vs Nilai Prediksi.\n\n"
-    
+
     # Independensi
     report += "## 2. Independensi (Durbin-Watson)\n"
     if 1.5 < dw_stat < 2.5:
@@ -141,7 +160,7 @@ def generate_diagnostic_report(dw_stat, pval_bp, shapiro_pval, vif_data):
         report += "\nSolusi:\n"
         report += "- Pertimbangkan untuk menambahkan variabel lag atau differencing pada data time series.\n"
         report += "- Gunakan model regresi yang robust terhadap autokorelasi, seperti Generalized Least Squares (GLS).\n\n"
-    
+
     # Homoskedastisitas
     report += "## 3. Homoskedastisitas (Breusch-Pagan)\n"
     if pval_bp > 0.05:
@@ -154,7 +173,7 @@ def generate_diagnostic_report(dw_stat, pval_bp, shapiro_pval, vif_data):
         report += "- Gunakan transformasi pada variabel (misalnya, log transformation).\n"
         report += "- Gunakan Weighted Least Squares (WLS) atau robust standard errors.\n"
         report += "- Pertimbangkan untuk menggunakan model heteroskedastisitas lainnya seperti GARCH untuk data time series.\n\n"
-    
+
     # Normalitas
     report += "## 4. Normalitas (Shapiro-Wilk)\n"
     if shapiro_pval > 0.05:
@@ -167,7 +186,7 @@ def generate_diagnostic_report(dw_stat, pval_bp, shapiro_pval, vif_data):
         report += "- Periksa dan tangani outlier jika ada.\n"
         report += "- Coba transformasi data (misalnya, log, square root, Box-Cox).\n"
         report += "- Jika ukuran sampel besar, pertimbangkan untuk menggunakan metode robust yang tidak mengasumsikan normalitas.\n\n"
-    
+
     # Multikolinearitas
     report += "## 5. Multikolinearitas (VIF)\n"
     max_vif = vif_data["VIF"].max()
@@ -181,13 +200,17 @@ def generate_diagnostic_report(dw_stat, pval_bp, shapiro_pval, vif_data):
     else:
         report += f"VIF maksimum: {max_vif:.2f}\n"
         report += "\nInterpretasi: Tidak terdeteksi multikolinearitas yang signifikan.\n"
-    
+
     return report
+
 
 # Main application logic
 if uploaded_files:
     # Process uploaded datasets
-    datasets = {file.name: pd.read_excel(file) for file in uploaded_files}
+    try:
+        datasets = {file.name: pd.read_excel(file) for file in uploaded_files}
+    except ValueError as e:
+        st.error(f"Error reading one of the files: {e}")
 
     # Dataset selection
     selected_dataset = st.sidebar.selectbox(
@@ -204,33 +227,69 @@ if uploaded_files:
     independent_vars = st.sidebar.multiselect("Select independent variables", options=[
                                               col for col in data.columns if col != dependent_var])
 
-    # Additional options
-    st.sidebar.subheader("Additional Options")
-    standardize = st.sidebar.checkbox("Standardize variables", value=False)
-    test_size = st.sidebar.slider(
-        "Test set size", min_value=0.1, max_value=0.5, value=0.2, step=0.1)
-
     if dependent_var and independent_vars:
         # Prepare the data for linear regression
         X = data[independent_vars]
         y = data[dependent_var]
 
-        # Standardize if selected
-        if standardize:
-            scaler = StandardScaler()
-            X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
+        # Perform regression analysis on the entire dataset
+        model, fig1, dw_stat, bp_pvalue, shapiro_test, fig2, vif_data = perform_regression_analysis(X, y)
 
-        # Split the data into train and test sets
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42)
-
-                        # Lakukan analisis regresi
-        model, fig1, dw_stat, pval, shapiro_test, fig2, vif_data = perform_regression_analysis(
-            X_train, y_train)
-
-        # Tampilkan ringkasan model
-        st.subheader("Ringkasan Model")
+        # Display initial model summary and test results
+        st.subheader("Initial Model Summary")
         st.text(model.summary())
+
+        # Check for violations and offer solutions
+        violations = []
+        if bp_pvalue <= 0.05:
+            violations.append("heteroscedasticity")
+        if shapiro_test.pvalue <= 0.05:
+            violations.append("non_normality")
+        if dw_stat < 1.5 or dw_stat > 2.5:
+            violations.append("autocorrelation")
+
+        if violations:
+            st.warning("The following assumptions are violated:")
+            for violation in violations:
+                st.write(f"- {violation.capitalize()}")
+
+            selected_violation = st.selectbox("Choose a violation to address:", violations)
+            if st.button("Apply Solution"):
+                new_model, new_X, new_y = handle_violations(X, y, selected_violation)
+                
+                # Perform regression analysis on the new model
+                new_model, new_fig1, new_dw_stat, new_bp_pvalue, new_shapiro_test, new_fig2, new_vif_data = perform_regression_analysis(new_X, new_y)
+
+                st.subheader("Comparison of Models")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("Original Model")
+                    st.metric("R-squared", f"{model.rsquared:.4f}")
+                    st.metric("Adjusted R-squared", f"{model.rsquared_adj:.4f}")
+                    st.metric("AIC", f"{model.aic:.2f}")
+                    st.metric("Durbin-Watson", f"{dw_stat:.4f}")
+                    st.metric("Breusch-Pagan p-value", f"{bp_pvalue:.4f}")
+                    st.metric("Shapiro-Wilk p-value", f"{shapiro_test.pvalue:.4f}")
+                    st.plotly_chart(fig1, use_container_width=True, key="original_fig1")
+                    st.plotly_chart(fig2, use_container_width=True, key="original_fig2")
+                with col2:
+                    st.write("Improved Model")
+                    st.metric("R-squared", f"{new_model.rsquared:.4f}")
+                    st.metric("Adjusted R-squared", f"{new_model.rsquared_adj:.4f}")
+                    st.metric("AIC", f"{new_model.aic:.2f}")
+                    st.metric("Durbin-Watson", f"{new_dw_stat:.4f}")
+                    st.metric("Breusch-Pagan p-value", f"{new_bp_pvalue:.4f}")
+                    st.metric("Shapiro-Wilk p-value", f"{new_shapiro_test.pvalue:.4f}")
+                    st.plotly_chart(new_fig1, use_container_width=True, key="new_fig1")
+                    st.plotly_chart(new_fig2, use_container_width=True, key="new_fig2")
+
+                st.subheader("Improved Model Summary")
+                st.text(new_model.summary())
+
+                # Display updated VIF data
+                st.subheader("Updated Multicollinearity Test (VIF)")
+                st.write(new_vif_data)
+
 
         # 1. Linearity test
         st.subheader("1. Uji Linearitas")
@@ -240,9 +299,10 @@ if uploaded_files:
             r"y = \beta_0 + \beta_1x_1 + \beta_2x_2 + ... + \beta_nx_n + \epsilon",
             "Periksa apakah residual tersebar secara acak di sekitar garis horizontal pada 0."
         )
-        st.plotly_chart(fig1)
+        st.plotly_chart(fig1, key="linearity_test")
         st.info(
             "Interpretasikan plot: Lihat penyebaran acak di sekitar garis horizontal pada 0.")
+
 
         # 2. Independence test
         st.subheader("2. Uji Independensi (Statistik Durbin-Watson)")
@@ -269,8 +329,8 @@ if uploaded_files:
             r"BP = nR^2 \sim \chi^2_{(p-1)}",
             "Jika p > 0.05, residual kemungkinan memiliki varians konstan."
         )
-        st.metric("Nilai p Breusch-Pagan", f"{pval:.4f}")
-        if pval > 0.05:
+        st.metric("Nilai p Breusch-Pagan", f"{bp_pvalue:.4f}")
+        if bp_pvalue > 0.05:
             st.success("Residual kemungkinan memiliki varians konstan.")
         else:
             st.warning("Residual mungkin memiliki varians tidak konstan.")
@@ -291,7 +351,7 @@ if uploaded_files:
             st.warning("Residual mungkin tidak terdistribusi normal.")
 
         # Q-Q plot for normality
-        st.plotly_chart(fig2)
+        st.plotly_chart(fig2, key="qq_plot")
 
         # 5. Multicollinearity test (Variance Inflation Factor - VIF)
         st.subheader(
@@ -313,11 +373,13 @@ if uploaded_files:
             st.warning(
                 "Beberapa fitur mungkin memiliki multikolinearitas tinggi (VIF > 10). Pertimbangkan untuk menghapus atau menggabungkan variabel yang sangat berkorelasi.")
         else:
-            st.success("Tidak terdeteksi multikolinearitas yang signifikan (VIF < 10).")
+            st.success(
+                "Tidak terdeteksi multikolinearitas yang signifikan (VIF < 10).")
 
         # Pindahkan Laporan Hasil Uji Diagnostik ke bagian paling bawah
         st.subheader("Laporan Hasil Uji Diagnostik")
-        diagnostic_report = generate_diagnostic_report(dw_stat, pval, shapiro_test.pvalue, vif_data)
+        diagnostic_report = generate_diagnostic_report(
+            dw_stat, bp_pvalue, shapiro_test.pvalue, vif_data)
         st.markdown(diagnostic_report)
 
         # # Opsi untuk mengunduh laporan diagnostik
