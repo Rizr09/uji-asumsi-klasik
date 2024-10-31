@@ -117,6 +117,7 @@ def perform_regression_analysis(X, y):
     vif_data["VIF"] = [variance_inflation_factor(
         X.values, i) for i in range(X.shape[1])]
     vif_data["Feature"] = X.columns
+    vif_data = vif_data[vif_data["Feature"] != "const"]
 
     return model, fig1, dw_stat, pval, shapiro_test, fig2, vif_data
 
